@@ -135,3 +135,4 @@ class CATEGORYS:
     def __repr__(self):
         message = "category_dict"
         return f"{self.__class__.__name__}({message})"  
+    
