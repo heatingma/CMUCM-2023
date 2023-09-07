@@ -130,9 +130,41 @@ class CATEGORYS:
                 all_sales_info = ctg_sales_info[ctg.id_name]
             else:
                 all_sales_info = pd.concat([all_sales_info, ctg_sales_info[ctg.id_name]], axis=1)
+        all_sales_info = zero_process(all_sales_info)
         all_sales_info.to_excel("processed_data/time_sale_all.xlsx")
     
     def __repr__(self):
         message = "category_dict"
         return f"{self.__class__.__name__}({message})"  
     
+    
+###################################################
+#              DataFrame Process Func             #
+###################################################
+
+def zero_process(df: pd.DataFrame):
+    # 创建一个副本，以避免在原始DataFrame上进行修改
+    df_copy = df.copy()
+
+    # 遍历DataFrame的列
+    for column in df_copy.columns:
+        # 获取值为0的索引
+        zero_indices = df_copy[df_copy[column] == 0].index
+
+        # 遍历值为0的索引
+        for index in zero_indices:
+            # 寻找最接近的两侧非零值的索引
+            non_zero_indices = df_copy[column][df_copy[column] != 0].index
+            left_index = non_zero_indices[non_zero_indices < index][-1]
+            right_index = non_zero_indices[non_zero_indices > index][0]
+
+            # 计算时间距离和数值距离的比例
+            time_distance = right_index - left_index
+            value_distance = df_copy.loc[right_index, column] - df_copy.loc[left_index, column]
+            interpolation_ratio = (index - left_index) / time_distance
+
+            # 使用线性插值替换值为0的元素
+            interpolated_value = df_copy.loc[left_index, column] + interpolation_ratio * value_distance
+            df_copy.at[index, column] = interpolated_value
+
+    return df_copy
