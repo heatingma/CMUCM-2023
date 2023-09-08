@@ -2,8 +2,6 @@ import pandas as pd
 import numpy as np
 from models import TimeDataSet
 from datetime import datetime
-import pickle
-import os
 
 
 def date_to_integer(date):
@@ -18,10 +16,14 @@ df = np.array(df).astype(float)
 dataset = TimeDataSet(df)
 
 
-def get_train_dataset(data_size=365, max_num=10):
-    filename = 'dataset/train_narx_arima_{}_{}.pkl'.format(data_size, max_num)
-    if os.path.exists(filename):
-        train_dataset = pickle.load(open(filename, "rb"))
+def get_dataset(mode="train", step=30):
+    if mode == "train":
+        return dataset.get_train_dataset(step, save=True) 
+    elif mode == "test":
+        return dataset.get_test_dataset(step, save=True) 
+    elif mode == "valid":
+        return dataset.get_valid_dataset(step, save=True)
+    elif mode == "all":
+        return dataset.get_all_dataset(step, save=True)
     else:
-        train_dataset = dataset.get_train_dataset(data_size, max_num, save=True)
-    return train_dataset   
+        raise ValueError("unvaild input mode") 

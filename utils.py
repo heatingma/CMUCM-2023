@@ -21,7 +21,12 @@ except FileNotFoundError:
     sales_info = np.array(pd.read_excel("data/data_2.xlsx"))
     np.save("processed_data/sales_info.npy", sales_info)
 
-
+try:
+    cost_info = np.load("processed_data/cost_info.npy", allow_pickle=True)
+except FileNotFoundError:
+    cost_info = np.array(pd.read_excel("data/data_3.xlsx"))
+    np.save("processed_data/cost_info.npy", cost_info)
+    
 ###################################################
 #        get item & category info function        #
 ###################################################
@@ -44,6 +49,8 @@ def get_categorys():
     for sale_info in sales_info:
         categorys.add_sale_info(sale_info[0], sale_info[2], sale_info[3], \
             sale_info[4], sale_info[5], sale_info[6])
+    for part_cost_info in cost_info:
+        categorys.add_cost(part_cost_info[0], part_cost_info[1], part_cost_info[2])
     return categorys
 
 
@@ -55,22 +62,36 @@ class GOODS:
     def __init__(self, id):
         self.id = id
         self.sales_info = list()
-    
+        self.cost_info = list()
+        
     def add_sale_info(self, date, volume, unit_price, sale_type, discount):
         self.sales_info.append([date, volume, unit_price, sale_type, discount])
 
+    def add_cost(self, date, cost):
+        self.cost_info.append([date, cost])
+        
     def get_time_sale_info(self):
         sales_info = np.array(self.sales_info)
         sales_info = pd.DataFrame(data=sales_info[:, 1], index=sales_info[:, 0], \
             columns=[get_goods_name(self.id)])
-        
         sales_info.index = pd.to_datetime(sales_info.index)
         date_range = pd.date_range(start="2020-07-01", end="2023-06-30", freq="D")
         sales_info = sales_info.groupby(sales_info.index).sum()
         sales_info = sales_info.reindex(date_range, fill_value=0)
         
         return sales_info
-            
+    
+    def get_cost_info(self):
+        date_range = pd.date_range(start="2020-07-01", end="2023-06-30", freq="D")
+        cost_info = pd.DataFrame(self.cost_info, columns=['time', 'cost'])
+        cost_info['time'] = pd.to_datetime(cost_info['time'])
+        cost_info = cost_info.set_index('time').reindex(date_range).reset_index()
+        cost_info['cost'] = cost_info['cost'].fillna(method='ffill')
+        cost_info['cost'] = cost_info['cost'].fillna(method='bfill')
+        cost_info['volume'] = np.array(self.get_time_sale_info().iloc[:, 0])
+        cost_info = cost_info.rename(columns={cost_info.columns[0]: 'time'})
+        return cost_info
+    
     def __repr__(self):
         message = "id, sales_info"
         return f"{self.__class__.__name__}({message})"  
@@ -90,6 +111,11 @@ class CATEGORY:
             unit_price, sale_type, discount)
         if self.id_name is None:
             self.id_name = get_category_name(goods_id)
+    
+    def add_cost(self, date, goods_id, cost):
+        if goods_id not in self.goods_dict.keys():
+            return
+        self.goods_dict[goods_id].add_cost(date, cost)
             
     def get_time_sale_info(self):
         ctg_sales_info = None
@@ -103,6 +129,24 @@ class CATEGORY:
         ctg_sales_info[self.id_name] = ctg_sales_info.sum(axis=1)
         return ctg_sales_info
 
+    def get_cost_info(self):
+        index = None
+        sum_cost = None
+        sum_volume = None
+        for goods in self.goods_dict.values():
+            goods: GOODS
+            goods_cost_info = goods.get_cost_info()
+            if index is None:
+                index = np.array(goods_cost_info['time'])
+                sum_volume = np.array(goods_cost_info['volume'])
+                sum_cost = np.array(goods_cost_info['cost']) * sum_volume
+            else:
+                cur_volume = np.array(goods_cost_info['volume'])
+                sum_volume += cur_volume
+                sum_cost += cur_volume * np.array(goods_cost_info['cost'])
+        ctg_cost_info = pd.DataFrame(data=sum_cost/sum_volume, index=index, columns=[self.id_name])
+        return ctg_cost_info
+    
     def __repr__(self):
         message = "id, goods_dict"
         return f"{self.__class__.__name__}({message})"  
@@ -119,7 +163,13 @@ class CATEGORYS:
             self.category_dict[category_id] = CATEGORY(category_id)
         self.category_dict[category_id].add_sale_info(date, goods_id, volume, \
         unit_price, sale_type, discount)
-
+    
+    def add_cost(self, date, goods_id, cost):
+        category_id = get_category_id(goods_id)
+        if category_id not in self.category_dict.keys():
+            return
+        self.category_dict[category_id].add_cost(date, goods_id, cost)
+        
     def get_time_sale_info(self):
         all_sales_info = None
         for ctg in self.category_dict.values():
@@ -132,7 +182,19 @@ class CATEGORYS:
                 all_sales_info = pd.concat([all_sales_info, ctg_sales_info[ctg.id_name]], axis=1)
         all_sales_info = zero_process(all_sales_info)
         all_sales_info.to_excel("processed_data/time_sale_all.xlsx")
-    
+
+    def get_cost_info(self):
+        all_cost_info = None
+        for ctg in self.category_dict.values():
+            ctg: CATEGORY
+            ctg_cost_info = ctg.get_cost_info()
+            if all_cost_info is None:
+                all_cost_info = ctg_cost_info
+            else:
+                all_cost_info = pd.concat([all_cost_info, ctg_cost_info[ctg.id_name]], axis=1)
+        all_cost_info.to_excel("processed_data/cost_all.xlsx")
+        return all_cost_info
+       
     def __repr__(self):
         message = "category_dict"
         return f"{self.__class__.__name__}({message})"  
