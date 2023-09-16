@@ -37,7 +37,7 @@
 
 ### Diff Forecast Comparison
 
-&emsp;&emsp;The comparison between the predicted residuals of the RAFN model and the actual residuals
+&emsp;&emsp;The comparison between the predicted residuals of the RFAN model and the actual residuals
 
 <div><center>
 <img src=pics/epoch_89_pred_lines_volume.png width=100% height=100%>
@@ -45,7 +45,7 @@
 
 ### Volume Forecast Comparison
 
-&emsp;&emsp;The comparison between sales predicted by the RAFN model, sales predicted by the ARIMA model, and actual sales
+&emsp;&emsp;The comparison between sales predicted by the RFAN model, sales predicted by the ARIMA model, and actual sales
 
 <div><center>
 <img src=pics/three_volume_lines_50.png width=100% height=100%>
