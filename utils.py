@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
-
+import matplotlib.pyplot as plt
+import os
+import copy
 
 ###################################################
 #                   data process                  #
@@ -10,7 +12,7 @@ try:
     category = np.load("processed_data/category.npy", allow_pickle=True).item()
 except FileNotFoundError:
     category = dict()
-    data = np.array(pd.read_excel("data/data_1.xlsx"))
+    data = np.array(pd.read_excel("data/data_1.xlsx").dropna())
     for item in data:
         category[item[0]] = (item[1], item[2], item[3])
     np.save("processed_data/category.npy", category)
@@ -18,18 +20,28 @@ except FileNotFoundError:
 try:
     sales_info = np.load("processed_data/sales_info.npy", allow_pickle=True)
 except FileNotFoundError:
-    sales_info = np.array(pd.read_excel("data/data_2.xlsx"))
+    sales_info = np.array(pd.read_excel("data/data_2.xlsx").dropna())
     np.save("processed_data/sales_info.npy", sales_info)
 
 try:
     cost_info = np.load("processed_data/cost_info.npy", allow_pickle=True)
 except FileNotFoundError:
-    cost_info = np.array(pd.read_excel("data/data_3.xlsx"))
+    cost_info = np.array(pd.read_excel("data/data_3.xlsx").dropna())
     np.save("processed_data/cost_info.npy", cost_info)
+
     
 ###################################################
 #        get item & category info function        #
 ###################################################
+
+def get_goods(item_id):
+    categorys = get_categorys()
+    ctg_id = get_category_id(item_id)
+    ctg = categorys.category_dict[ctg_id]
+    ctg: CATEGORY
+    goods = ctg.goods_dict[item_id]
+    goods: GOODS
+    return goods
 
 
 def get_goods_name(item_id):
@@ -42,6 +54,16 @@ def get_category_id(item_id):
 
 def get_category_name(item_id):
     return category[item_id][2]
+
+
+def category_name2id(name:str):
+    trans_dict = {'辣椒类':1011010504, 
+                  '花叶类':1011010101,
+                  '花菜类':1011010201,
+                  '水生根茎类':1011010402,
+                  '食用菌':1011010801,
+                  '茄类':1011010501}
+    return trans_dict[name]
 
 
 def get_categorys():
@@ -77,9 +99,20 @@ class GOODS:
         sales_info.index = pd.to_datetime(sales_info.index)
         date_range = pd.date_range(start="2020-07-01", end="2023-06-30", freq="D")
         sales_info = sales_info.groupby(sales_info.index).sum()
-        sales_info = sales_info.reindex(date_range, fill_value=0)
-        
+        sales_info = sales_info.reindex(date_range)
+        self.df_time_sale_info = sales_info
         return sales_info
+
+    def get_price_info_info(self):
+        sales_info = np.array(self.sales_info)
+        data = np.array(sales_info[:, 2] * sales_info[:, 1], dtype=float)
+        price_info = pd.DataFrame(data=data, index=sales_info[:, 0], \
+            columns=[get_goods_name(self.id)])
+        price_info.index = pd.to_datetime(price_info.index)
+        date_range = pd.date_range(start="2020-07-01", end="2023-06-30", freq="D")
+        price_info = price_info.groupby(price_info.index).sum()
+        price_info = price_info.reindex(date_range)
+        return price_info
     
     def get_cost_info(self):
         date_range = pd.date_range(start="2020-07-01", end="2023-06-30", freq="D")
@@ -88,8 +121,11 @@ class GOODS:
         cost_info = cost_info.set_index('time').reindex(date_range).reset_index()
         cost_info['cost'] = cost_info['cost'].fillna(method='ffill')
         cost_info['cost'] = cost_info['cost'].fillna(method='bfill')
-        cost_info['volume'] = np.array(self.get_time_sale_info().iloc[:, 0])
-        cost_info = cost_info.rename(columns={cost_info.columns[0]: 'time'})
+        volume = np.array(self.get_time_sale_info().iloc[:, 0])
+        prices = np.array(self.get_price_info_info().iloc[:, 0])
+        cost_info['volume'] = volume
+        cost_info['price'] = np.nan_to_num(prices / volume)
+        cost_info = cost_info.rename(columns={cost_info.columns[0]: 'time'}).fillna(0)
         return cost_info
     
     def __repr__(self):
@@ -133,6 +169,7 @@ class CATEGORY:
         index = None
         sum_cost = None
         sum_volume = None
+        sum_price = None
         for goods in self.goods_dict.values():
             goods: GOODS
             goods_cost_info = goods.get_cost_info()
@@ -140,11 +177,17 @@ class CATEGORY:
                 index = np.array(goods_cost_info['time'])
                 sum_volume = np.array(goods_cost_info['volume'])
                 sum_cost = np.array(goods_cost_info['cost']) * sum_volume
+                sum_price = np.array(goods_cost_info['price']) * sum_volume
             else:
                 cur_volume = np.array(goods_cost_info['volume'])
                 sum_volume += cur_volume
                 sum_cost += cur_volume * np.array(goods_cost_info['cost'])
-        ctg_cost_info = pd.DataFrame(data=sum_cost/sum_volume, index=index, columns=[self.id_name])
+                sum_price += cur_volume * np.array(goods_cost_info['price'])
+
+        data = np.concatenate([sum_cost/sum_volume, \
+            sum_price/sum_volume], axis=0).reshape(2, -1).T
+        ctg_cost_info = pd.DataFrame(data=data, index=index, \
+            columns=[self.id_name+"平均成本", self.id_name+"平均售价"])
         return ctg_cost_info
     
     def __repr__(self):
@@ -180,7 +223,8 @@ class CATEGORYS:
                 all_sales_info = ctg_sales_info[ctg.id_name]
             else:
                 all_sales_info = pd.concat([all_sales_info, ctg_sales_info[ctg.id_name]], axis=1)
-        all_sales_info = zero_process(all_sales_info)
+        all_sales_info.dropna(inplace=True)
+        all_sales_info = all_sales_info[~(all_sales_info == 0).any(axis=1)]
         all_sales_info.to_excel("processed_data/time_sale_all.xlsx")
 
     def get_cost_info(self):
@@ -191,42 +235,75 @@ class CATEGORYS:
             if all_cost_info is None:
                 all_cost_info = ctg_cost_info
             else:
-                all_cost_info = pd.concat([all_cost_info, ctg_cost_info[ctg.id_name]], axis=1)
+                all_cost_info = pd.concat([all_cost_info, ctg_cost_info], axis=1)
+        all_cost_info.dropna(inplace=True)
         all_cost_info.to_excel("processed_data/cost_all.xlsx")
         return all_cost_info
        
     def __repr__(self):
         message = "category_dict"
         return f"{self.__class__.__name__}({message})"  
-    
-    
+
+
 ###################################################
-#              DataFrame Process Func             #
+#                   draw picture                  #
 ###################################################
 
-def zero_process(df: pd.DataFrame):
-    # 创建一个副本，以避免在原始DataFrame上进行修改
-    df_copy = df.copy()
+def draw_xy(x: np.ndarray, y:np.ndarray, save=False, filename="draw_xy.png"):
+    point_size = 2
+    plt.scatter(x, y, s=point_size)
+    plt.title("Scatter Plot of x and y")
+    plt.xlabel("x")
+    plt.ylabel("y")
+    if save:
+        plt.savefig(os.path.join("pics", filename))
+    plt.clf()
+        
 
-    # 遍历DataFrame的列
-    for column in df_copy.columns:
-        # 获取值为0的索引
-        zero_indices = df_copy[df_copy[column] == 0].index
+     
+def draw_arrays(array: np.ndarray, array2: np.ndarray, 
+                label1='Array 1', label2='Array 2',
+                save=False, filename="draw_arrays.png"):
+    x = np.arange(len(array))
+    plt.figure(figsize=(30, 10))
+    plt.plot(x, array, marker='o', label=label1)
+    plt.plot(x, array2, marker='o', label=label2)
+    plt.title('One-dimensional Vector')
+    plt.xlabel('Index')
+    plt.ylabel('Value')
+    plt.legend()
+    if save:
+        plt.savefig(os.path.join("pics", filename))
+    plt.clf()
 
-        # 遍历值为0的索引
-        for index in zero_indices:
-            # 寻找最接近的两侧非零值的索引
-            non_zero_indices = df_copy[column][df_copy[column] != 0].index
-            left_index = non_zero_indices[non_zero_indices < index][-1]
-            right_index = non_zero_indices[non_zero_indices > index][0]
+def draw_three_arrays(array: np.ndarray, array2: np.ndarray, array3: np.ndarray,
+                label1='Array 1', label2='Array 2', label3='Array 3',
+                save=False, filename="draw_arrays.png"):
+    plt.rcParams.update({'font.size': 16})
+    x = np.arange(len(array))
+    plt.figure(figsize=(30, 10))
+    plt.plot(x, array, marker='o', label=label1)
+    plt.plot(x, array2, marker='o', label=label2)
+    plt.plot(x, array3, marker='o', label=label3)
+    plt.title('Predictions compare')
+    plt.xlabel('time')
+    plt.ylabel('predict')
+    plt.legend()
+    if save:
+        plt.savefig(os.path.join("pics", filename))
+    plt.clf()
 
-            # 计算时间距离和数值距离的比例
-            time_distance = right_index - left_index
-            value_distance = df_copy.loc[right_index, column] - df_copy.loc[left_index, column]
-            interpolation_ratio = (index - left_index) / time_distance
-
-            # 使用线性插值替换值为0的元素
-            interpolated_value = df_copy.loc[left_index, column] + interpolation_ratio * value_distance
-            df_copy.at[index, column] = interpolated_value
-
-    return df_copy
+def draw_array(array: np.ndarray, save=False, filename="draw_array.png", figsize=(15, 8), 
+               label="array", x_label='Index', y_label='Value', title="One-dimensional Vector", noise_method=True):
+    plt.figure(figsize=figsize)
+    if noise_method:
+        mean_array = abs(np.average(array))
+        array = array[~(abs(array) >= mean_array * 20)]
+    x = np.arange(len(array))
+    plt.plot(x, array, marker='o', markersize=3, label=label)
+    plt.title(title)
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    if save:
+        plt.savefig(os.path.join("pics", filename))
+    plt.clf()
